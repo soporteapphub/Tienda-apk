@@ -1,0 +1,67 @@
+name: Build APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: write   # necesario para crear la Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tienda_apk
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descomprimir el proyecto
+        working-directory: .
+        run: unzip -q tienda_apk.zip
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Etiqueta con fecha y hora
+        id: fecha
+        run: |
+          echo "tag=v$(TZ=America/Guayaquil date +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+          echo "build=$(( $(date +%s) / 60 ))" >> "$GITHUB_OUTPUT"
+
+      - name: Preparar proyecto Android
+        run: |
+          flutter create --platforms=android --org com.tienda --project-name tienda_apk /tmp/scaffold
+          rm -rf android
+          cp -r /tmp/scaffold/android android
+          rm -rf test
+          python3 tools/patch_android.py
+
+      - run: flutter pub get
+
+      - name: Compilar APK
+        run: flutter build apk --release --build-number=${{ steps.fecha.outputs.build }}
+
+      - name: Renombrar APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk TiendaAPK.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TiendaAPK
+          path: tienda_apk/TiendaAPK.apk
+
+      - name: Publicar Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.fecha.outputs.tag }}
+          name: Tienda APK ${{ steps.fecha.outputs.tag }}
+          make_latest: true
+          files: tienda_apk/TiendaAPK.apk
